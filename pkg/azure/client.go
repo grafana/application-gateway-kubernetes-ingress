@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"net"
 	"time"
 
 	r "github.com/Azure/azure-sdk-for-go/profiles/latest/resources/mgmt/resources"
@@ -29,6 +31,9 @@ type DeployGatewayParams struct {
 	EnableHTTP2          bool
 	AutoscaleMinReplicas int32
 	AutoscaleMaxReplicas int32
+	PrivateIP            string
+	FindPrivateIP        bool
+	NoPublicIP           bool
 }
 
 // AzClient is an interface for client to Azure
@@ -44,6 +49,7 @@ type AzClient interface {
 	DeployGatewayWithVnet(ResourceGroup, ResourceName, ResourceName, string, DeployGatewayParams) error
 	DeployGatewayWithSubnet(string, DeployGatewayParams) error
 	GetSubnet(string) (n.Subnet, error)
+	GetAvailablePrivateIP(string) (*string, error)
 
 	GetPublicIP(string) (n.PublicIPAddress, error)
 }
@@ -357,6 +363,16 @@ func (az *azClient) DeployGatewayWithSubnet(subnetID string, params DeployGatewa
 		return
 	}
 	klog.Infof("Using resource group: %v", *group.Name)
+
+	if params.FindPrivateIP {
+		// get private ip
+		ip, err := az.GetAvailablePrivateIP(subnetID)
+		if err != nil {
+			return err
+		}
+		params.PrivateIP = *ip
+		klog.Infof("Found available private ip: %s", *ip)
+	}
 
 	deploymentName := string(az.appGwName)
 	klog.Infof("Starting ARM template deployment: %s", deploymentName)
@@ -684,5 +700,176 @@ func getTemplate(params DeployGatewayParams) map[string]interface{} {
 		appGwProperties["enableHttp2"] = true
 	}
 
+	// Add private IP if specified
+	if params.PrivateIP != "" {
+		frontendIPConfigurations := appGwProperties["frontendIPConfigurations"].([]interface{})
+		frontendIPConfigurations = append(frontendIPConfigurations, map[string]interface{}{
+			"name": "appGatewayFrontendPrivateIP",
+			"properties": map[string]interface{}{
+				"privateIPAddress":          params.PrivateIP,
+				"privateIPAllocationMethod": "Static",
+				"subnet": map[string]interface{}{
+					"id": "[parameters('applicationGatewaySubnetId')]",
+				},
+			},
+		})
+		appGwProperties["frontendIPConfigurations"] = frontendIPConfigurations
+	}
+
+	if params.NoPublicIP {
+		// 1. Remove Public IP from variables
+		variables := contents["variables"].(map[string]interface{})
+		delete(variables, "applicationGatewayPublicIpName")
+		delete(variables, "applicationGatewayPublicIpId")
+
+		var appGwResource map[string]interface{}
+
+		// 2. Remove Public IP and dependsOn from resources
+		var newResources []interface{}
+		resources := contents["resources"].([]interface{})
+		for _, resource := range resources {
+			resMap := resource.(map[string]interface{})
+			if resMap["type"] != "Microsoft.Network/publicIPAddresses" {
+				newResources = append(newResources, resource)
+				if resMap["type"] == "Microsoft.Network/applicationGateways" {
+					appGwResource = resMap
+				}
+			}
+		}
+		contents["resources"] = newResources
+
+		delete(appGwResource, "dependsOn")
+
+		properties := appGwResource["properties"].(map[string]interface{})
+
+		// 3. Remove public frontend IP config
+		frontendIPConfigurations := properties["frontendIPConfigurations"].([]interface{})
+		var newFrontendIPConfigurations []interface{}
+		for _, feIPConfig := range frontendIPConfigurations {
+			feIPConfigMap := feIPConfig.(map[string]interface{})
+			if feIPConfigMap["name"] != "appGatewayFrontendIP" {
+				newFrontendIPConfigurations = append(newFrontendIPConfigurations, feIPConfig)
+			}
+		}
+		properties["frontendIPConfigurations"] = newFrontendIPConfigurations
+
+		// 4. Update HTTP listener
+		httpListeners := properties["httpListeners"].([]interface{})
+		for _, listener := range httpListeners {
+			listenerMap := listener.(map[string]interface{})
+			listenerProps := listenerMap["properties"].(map[string]interface{})
+			frontendIPConfig := listenerProps["frontendIPConfiguration"].(map[string]interface{})
+			frontendIPConfig["id"] = "[concat(variables('applicationGatewayId'), '/frontendIPConfigurations/appGatewayFrontendPrivateIP')]"
+		}
+	}
+
 	return contents
+}
+
+func (az *azClient) GetAvailablePrivateIP(subnetID string) (*string, error) {
+	_, subnetResourceGroup, vnetName, subnetName := ParseSubResourceID(subnetID)
+
+	// get the subnet
+	subnet, err := az.subnetsClient.Get(az.ctx, string(subnetResourceGroup), string(vnetName), string(subnetName), "")
+	if err != nil {
+		return nil, err
+	}
+
+	// generate random list of IPs in the subnet
+	availableIPs, err := generateRandomIPsInSubnet(subnet.AddressPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	// check each IP for availability using Azure API
+	for _, ip := range availableIPs {
+		klog.Infof("Checking IP availability for %s", ip)
+
+		result, err := az.virtualNetworksClient.CheckIPAddressAvailability(az.ctx, string(subnetResourceGroup), string(vnetName), ip)
+		if err != nil {
+			klog.Infof("Error checking IP availability for %s: %v", ip, err)
+			continue
+		}
+
+		if result.Available != nil && *result.Available {
+			klog.V(3).Infof("Found available IP: %s", ip)
+			return &ip, nil
+		}
+	}
+
+	return nil, controllererrors.NewError(
+		controllererrors.ErrorFindingAvailablePrivateIP, "No available private IP found in the subnet",
+	)
+}
+
+func generateRandomIPsInSubnet(subnetAddressPrefix *string) ([]string, error) {
+	if subnetAddressPrefix == nil {
+		return nil, fmt.Errorf("subnet address prefix cannot be nil")
+	}
+
+	// get the first and last ip in the subnet
+	firstIP, lastIP, err := getFirstAndLastIP(subnetAddressPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	// calculate total usable IPs (excluding network and broadcast)
+	totalUsableIPs := lastIP - firstIP - 1
+	if totalUsableIPs <= 0 {
+		return nil, fmt.Errorf("subnet has no usable IP addresses")
+	}
+
+	// determine how many IPs we want to generate
+	maxIPs := 50
+	numIPsToGenerate := int(totalUsableIPs)
+	if numIPsToGenerate > maxIPs {
+		numIPsToGenerate = maxIPs
+	}
+
+	// generate random unique IPs
+	usedIPs := make(map[uint32]bool)
+	var ipStrings []string
+
+	for len(ipStrings) < numIPsToGenerate {
+		// generate random IP in range (excluding network and broadcast)
+		randomOffset := rand.Intn(int(totalUsableIPs))
+		randomIP := firstIP + 1 + uint32(randomOffset)
+
+		// skip if we've already used this IP
+		if usedIPs[randomIP] {
+			continue
+		}
+
+		usedIPs[randomIP] = true
+		ipStrings = append(ipStrings, longToIP(randomIP))
+	}
+
+	return ipStrings, nil
+}
+
+func getFirstAndLastIP(subnetAddressPrefix *string) (uint32, uint32, error) {
+	if subnetAddressPrefix == nil {
+		return 0, 0, fmt.Errorf("subnet address prefix cannot be nil")
+	}
+
+	// get the first and last ip in the subnet
+	ip, ipNet, err := net.ParseCIDR(*subnetAddressPrefix)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid CIDR format: %v", err)
+	}
+
+	firstIP := ipToLong(ip)
+	mask := ipNet.Mask
+	lastIP := firstIP | (uint32((1<<(net.IPv4len*8))-1) ^ ipToLong(net.IP(mask)))
+
+	return firstIP, lastIP, nil
+}
+
+func ipToLong(ip net.IP) uint32 {
+	ip = ip.To4()
+	return (uint32(ip[0]) << 24) | (uint32(ip[1]) << 16) | (uint32(ip[2]) << 8) | uint32(ip[3])
+}
+
+func longToIP(ip uint32) string {
+	return fmt.Sprintf("%d.%d.%d.%d", byte(ip>>24), byte(ip>>16), byte(ip>>8), byte(ip))
 }

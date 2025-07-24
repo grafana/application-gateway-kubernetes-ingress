@@ -173,6 +173,8 @@ func main() {
 			EnableHTTP2:          env.AppGwEnableHTTP2,
 			AutoscaleMinReplicas: env.AppGwAutoscaleMinReplicas,
 			AutoscaleMaxReplicas: env.AppGwAutoscaleMaxReplicas,
+			FindPrivateIP:        env.AppGwFindPrivateIP,
+			NoPublicIP:           env.AppGwNoPublicIP,
 		}
 		if controllererrors.IsErrorCode(err, controllererrors.ErrorApplicationGatewayNotFound) && env.EnableDeployAppGateway {
 			if env.AppGwSubnetID != "" {

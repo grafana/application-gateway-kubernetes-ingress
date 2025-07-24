@@ -126,3 +126,7 @@ func (az *FakeAzClient) GetSubnet(subnetID string) (n.Subnet, error) {
 	}
 	return n.Subnet{}, nil
 }
+
+func (az *FakeAzClient) GetAvailablePrivateIP(subnetID string) (*string, error) {
+	return nil, nil
+}

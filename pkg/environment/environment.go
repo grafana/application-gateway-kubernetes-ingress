@@ -60,6 +60,12 @@ const (
 	// AppGwAutoscaleMaxReplicasVarName is the name of the APPGW_AUTOSCALE_MAX_REPLICAS
 	AppGwAutoscaleMaxReplicasVarName = "APPGW_AUTOSCALE_MAX_REPLICAS"
 
+	// FindPrivateIPVarName is the name of the APPGW_FIND_PRIVATE_IP
+	FindPrivateIPVarName = "APPGW_FIND_PRIVATE_IP"
+
+	// NoPublicIPVarName is the name of the APPGW_NO_PUBLIC_IP
+	NoPublicIPVarName = "APPGW_NO_PUBLIC_IP"
+
 	// AuthLocationVarName is the name of the AZURE_AUTH_LOCATION
 	AuthLocationVarName = "AZURE_AUTH_LOCATION"
 
@@ -160,6 +166,8 @@ type EnvVariables struct {
 	AppGwEnableHTTP2            bool
 	AppGwAutoscaleMinReplicas   int32
 	AppGwAutoscaleMaxReplicas   int32
+	AppGwFindPrivateIP          bool
+	AppGwNoPublicIP             bool
 	AuthLocation                string
 	IngressClass                string
 	IngressClassControllerName  string
@@ -227,6 +235,8 @@ func (env *EnvVariables) Consolidate(cpConfig *azure.CloudProviderConfig) {
 // GetEnv returns values for defined environment variables for Ingress Controller.
 func GetEnv() EnvVariables {
 	usePrivateIP, _ := strconv.ParseBool(os.Getenv(UsePrivateIPVarName))
+	findPrivateIP, _ := strconv.ParseBool(os.Getenv(FindPrivateIPVarName))
+	noPublicIP, _ := strconv.ParseBool(os.Getenv(NoPublicIPVarName))
 	multiClusterMode, _ := strconv.ParseBool(os.Getenv(MultiClusterModeVarName))
 	appGwAutoscaleMinReplicas, _ := strconv.ParseInt(os.Getenv(AppGwAutoscaleMinReplicasVarName), 10, 32)
 	appGwAutoscaleMaxReplicas, _ := strconv.ParseInt(os.Getenv(AppGwAutoscaleMaxReplicasVarName), 10, 32)
@@ -246,6 +256,8 @@ func GetEnv() EnvVariables {
 		AppGwEnableHTTP2:            GetEnvironmentVariable(AppGwEnableHTTP2VarName, "false", boolValidator) == "true",
 		AppGwAutoscaleMinReplicas:   int32(appGwAutoscaleMinReplicas),
 		AppGwAutoscaleMaxReplicas:   int32(appGwAutoscaleMaxReplicas),
+		AppGwFindPrivateIP:          findPrivateIP,
+		AppGwNoPublicIP:             noPublicIP,
 		AuthLocation:                os.Getenv(AuthLocationVarName),
 		IngressClass:                os.Getenv(IngressClassVarName),
 		IngressClassResourceEnabled: GetEnvironmentVariable(IngressClassResourceEnabledVarName, "false", boolValidator) == "true",
