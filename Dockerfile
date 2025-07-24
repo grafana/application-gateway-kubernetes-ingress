@@ -1,36 +1,13 @@
-ARG BUILDPLATFORM=linux/amd64
-ARG BUILD_BASE_IMAGE
-ARG BINARY_BASE_IMAGE
+FROM       gcr.io/distroless/static-debian12
 
-FROM --platform=$BUILDPLATFORM $BUILD_BASE_IMAGE AS build
-WORKDIR /azure
+# Expose TARGETOS and TARGETARCH variables. These are supported by Docker when using BuildKit, but must be "enabled" using ARG.
+ARG        TARGETOS
+ARG        TARGETARCH
 
-COPY go.mod go.sum /azure/
-RUN go mod download
+COPY       bin/appgw_ingress_${TARGETOS}_${TARGETARCH} /bin/appgw_ingress
+ENTRYPOINT [ "/bin/appgw_ingress" ]
 
-RUN apt-get update
-RUN apt-get install -y ca-certificates openssl
 
-ARG TARGETOS
-ARG TARGETARCH
-ARG BUILD_TAG
-ARG BUILD_DATE
-ARG GIT_HASH
-
-COPY cmd cmd
-COPY pkg pkg
-COPY Makefile Makefile
-
-RUN make build \
-    GOOS=${TARGETOS} \
-    GOARCH=${TARGETARCH} \
-    BUILD_TAG=${BUILD_TAG} \
-    BUILD_DATE=${BUILD_DATE} \
-    GIT_HASH=${GIT_HASH}
-RUN chmod +x ./bin/appgw-ingress
-
-#RUN ldd ./bin/appgw-ingress 2>&1 | grep 'not a dynamic executable'
-
-FROM $BINARY_BASE_IMAGE AS final
-COPY --from=build /azure/bin/appgw-ingress /appgw-ingress
-CMD ["/appgw-ingress"]
+LABEL org.opencontainers.image.title="application-gateway-kubernetes-ingress" \
+      org.opencontainers.image.source="https://github.com/grafana/application-gateway-kubernetes-ingress/tree/master/cmd/appgw-ingress" \
+      org.opencontainers.image.revision="${REVISION}"
