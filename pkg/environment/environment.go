@@ -9,7 +9,9 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 
+	"github.com/Azure/go-autorest/autorest/to"
 	"k8s.io/klog/v2"
 
 	"github.com/Azure/application-gateway-kubernetes-ingress/pkg/azure"
@@ -55,6 +57,24 @@ const (
 
 	// UsePrivateIPVarName is the name of the USE_PRIVATE_IP
 	UsePrivateIPVarName = "USE_PRIVATE_IP"
+
+	// FindPrivateIPVarName is the name of the APPGW_FIND_PRIVATE_IP
+	FindPrivateIPVarName = "APPGW_FIND_PRIVATE_IP"
+
+	// NoPublicIPVarName is the name of the APPGW_NO_PUBLIC_IP
+	NoPublicIPVarName = "APPGW_NO_PUBLIC_IP"
+
+	// AutoscaleMinReplicasVarName is the name of the APPGW_AUTOSCALE_MIN_REPLICAS
+	AutoscaleMinReplicasVarName = "APPGW_AUTOSCALE_MIN_REPLICAS"
+
+	// AutoscaleMaxReplicasVarName is the name of the APPGW_AUTOSCALE_MAX_REPLICAS
+	AutoscaleMaxReplicasVarName = "APPGW_AUTOSCALE_MAX_REPLICAS"
+
+	// ZonesVarName is the name of the APPGW_ZONES
+	ZonesVarName = "APPGW_ZONES"
+
+	// EnableHTTP2VarName is the name of the APPGW_ENABLE_HTTP2
+	EnableHTTP2VarName = "APPGW_ENABLE_HTTP2"
 
 	// VerbosityLevelVarName sets the level of klog verbosity should the CLI argument be blank
 	VerbosityLevelVarName = "APPGW_VERBOSITY_LEVEL"
@@ -151,6 +171,12 @@ type EnvVariables struct {
 	IngressClassResourceDefault bool
 	WatchNamespace              string
 	UsePrivateIP                bool
+	FindPrivateIP               bool
+	NoPublicIP                  bool
+	AutoscaleMinReplicas        *int32
+	AutoscaleMaxReplicas        *int32
+	Zones                       []string
+	EnableHTTP2                 bool
 	VerbosityLevel              string
 	AGICPodName                 string
 	AGICPodNamespace            string
@@ -210,7 +236,43 @@ func (env *EnvVariables) Consolidate(cpConfig *azure.CloudProviderConfig) {
 // GetEnv returns values for defined environment variables for Ingress Controller.
 func GetEnv() EnvVariables {
 	usePrivateIP, _ := strconv.ParseBool(os.Getenv(UsePrivateIPVarName))
+	findPrivateIP, _ := strconv.ParseBool(os.Getenv(FindPrivateIPVarName))
+	noPublicIP, _ := strconv.ParseBool(os.Getenv(NoPublicIPVarName))
+	autoscaleMinReplicasStr := os.Getenv(AutoscaleMinReplicasVarName)
+	autoscaleMaxReplicasStr := os.Getenv(AutoscaleMaxReplicasVarName)
 	multiClusterMode, _ := strconv.ParseBool(os.Getenv(MultiClusterModeVarName))
+
+	var autoscaleMinReplicas *int32
+	if autoscaleMinReplicasStr != "" {
+		autoscaleMinReplicasInt, err := strconv.Atoi(autoscaleMinReplicasStr)
+		if err == nil {
+			autoscaleMinReplicas = to.Int32Ptr(int32(autoscaleMinReplicasInt))
+		}
+	}
+
+	var autoscaleMaxReplicas *int32
+	if autoscaleMaxReplicasStr != "" {
+		autoscaleMaxReplicasInt, err := strconv.Atoi(autoscaleMaxReplicasStr)
+		if err == nil {
+			autoscaleMaxReplicas = to.Int32Ptr(int32(autoscaleMaxReplicasInt))
+		}
+	}
+
+	// Parse zones from comma-separated string
+	zonesStr := os.Getenv(ZonesVarName)
+	var zones []string
+	if zonesStr != "" {
+		// Split by comma and trim whitespace
+		for _, zone := range strings.Split(zonesStr, ",") {
+			trimmedZone := strings.TrimSpace(zone)
+			if trimmedZone != "" {
+				zones = append(zones, trimmedZone)
+			}
+		}
+	}
+
+	// Parse HTTP2 enable flag
+	enableHTTP2, _ := strconv.ParseBool(os.Getenv(EnableHTTP2VarName))
 
 	env := EnvVariables{
 		CloudProviderConfigLocation: os.Getenv(CloudProviderConfigLocationVarName),
@@ -231,6 +293,12 @@ func GetEnv() EnvVariables {
 		IngressClassControllerName:  os.Getenv(IngressClassControllerNameVarName),
 		WatchNamespace:              os.Getenv(WatchNamespaceVarName),
 		UsePrivateIP:                usePrivateIP,
+		FindPrivateIP:               findPrivateIP,
+		NoPublicIP:                  noPublicIP,
+		AutoscaleMinReplicas:        autoscaleMinReplicas,
+		AutoscaleMaxReplicas:        autoscaleMaxReplicas,
+		Zones:                       zones,
+		EnableHTTP2:                 enableHTTP2,
 		VerbosityLevel:              os.Getenv(VerbosityLevelVarName),
 		AGICPodName:                 os.Getenv(AGICPodNameVarName),
 		AGICPodNamespace:            os.Getenv(AGICPodNamespaceVarName),
@@ -293,6 +361,13 @@ func ValidateEnv(env EnvVariables) error {
 					"If providing APPGW_NAME, You can also provided APPGW_SUBSCRIPTION_ID (helm var name: .appgw.subscriptionId) and APPGW_RESOURCE_GROUP (helm var name: .appgw.resourceGroup)",
 			)
 		}
+	}
+
+	if (env.AutoscaleMinReplicas != nil && env.AutoscaleMaxReplicas == nil) || (env.AutoscaleMinReplicas == nil && env.AutoscaleMaxReplicas != nil) {
+		return controllererrors.NewError(
+			controllererrors.ErrorInvalidAutoscaleConfig,
+			"Please provide both APPGW_AUTOSCALE_MIN_REPLICAS and APPGW_AUTOSCALE_MAX_REPLICAS",
+		)
 	}
 
 	if env.WatchNamespace == "" {

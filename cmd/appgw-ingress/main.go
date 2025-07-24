@@ -169,9 +169,9 @@ func main() {
 	if err != nil {
 		if controllererrors.IsErrorCode(err, controllererrors.ErrorApplicationGatewayNotFound) && env.EnableDeployAppGateway {
 			if env.AppGwSubnetID != "" {
-				err = azClient.DeployGatewayWithSubnet(env.AppGwSubnetID, env.AppGwSkuName)
+				err = azClient.DeployGatewayWithSubnet(env.AppGwSubnetID, env.AppGwSkuName, env.FindPrivateIP, env.NoPublicIP, env.AutoscaleMinReplicas, env.AutoscaleMaxReplicas, env.Zones, env.EnableHTTP2)
 			} else if cpConfig != nil {
-				err = azClient.DeployGatewayWithVnet(azure.ResourceGroup(cpConfig.VNetResourceGroup), azure.ResourceName(cpConfig.VNetName), azure.ResourceName(env.AppGwSubnetName), env.AppGwSubnetPrefix, env.AppGwSkuName)
+				err = azClient.DeployGatewayWithVnet(azure.ResourceGroup(cpConfig.VNetResourceGroup), azure.ResourceName(cpConfig.VNetName), azure.ResourceName(env.AppGwSubnetName), env.AppGwSubnetPrefix, env.AppGwSkuName, env.FindPrivateIP, env.NoPublicIP, env.AutoscaleMinReplicas, env.AutoscaleMaxReplicas, env.Zones, env.EnableHTTP2)
 			}
 
 			if err != nil {

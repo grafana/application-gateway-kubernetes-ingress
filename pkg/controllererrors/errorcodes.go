@@ -75,5 +75,7 @@ const (
 	ErrorMissingResourceGroup                   ErrorCode = "ErrorMissingResourceGroup"
 
 	// main package
-	ErrorNoSuchNamespace ErrorCode = "ErrorNoSuchNamespace"
+	ErrorNoSuchNamespace           ErrorCode = "ErrorNoSuchNamespace"
+	ErrorFindingAvailablePrivateIP ErrorCode = "ErrorFindingAvailablePrivateIP"
+	ErrorInvalidAutoscaleConfig              = "ErrorInvalidAutoscaleConfig"
 )
