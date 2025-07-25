@@ -198,9 +198,10 @@ func (c *Context) Run(stopChannel chan struct{}, omitCRDs bool, envVariables env
 		c.informers.Service,
 		c.informers.Secret,
 		c.informers.Ingress,
+	}
 
-		c.informers.AzureApplicationGatewayRewrite,
-
+	if !omitCRDs {
+		sharedInformers = append(sharedInformers, c.informers.AzureApplicationGatewayRewrite)
 		//TODO: enabled by ccp feature flag
 		// c.informers.AzureApplicationGatewayBackendPool,
 		// c.informers.AzureApplicationGatewayInstanceUpdateStatus,

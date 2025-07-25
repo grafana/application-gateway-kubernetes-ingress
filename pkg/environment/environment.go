@@ -134,6 +134,9 @@ const (
 
 	// AddonModeVarName is an environment variable to inform if the controller is running as an addon.
 	AddonModeVarName = "ADDON_MODE"
+
+	// IgnoreCRDsVarName is an environment variable to ignore CRDs.
+	IgnoreCRDsVarName = "IGNORE_CRDS"
 )
 
 const (
@@ -191,6 +194,7 @@ type EnvVariables struct {
 	ReconcilePeriodSeconds      string
 	MultiClusterMode            bool
 	AddonMode                   bool
+	IgnoreCRDs                  bool
 }
 
 // Consolidate sets defaults and missing values using cpConfig
@@ -281,6 +285,7 @@ func GetEnv() EnvVariables {
 		ReconcilePeriodSeconds:      os.Getenv(ReconcilePeriodSecondsVarName),
 		MultiClusterMode:            multiClusterMode,
 		AddonMode:                   GetEnvironmentVariable(AddonModeVarName, "false", boolValidator) == "true",
+		IgnoreCRDs:                  GetEnvironmentVariable(IgnoreCRDsVarName, "false", boolValidator) == "true",
 	}
 
 	return env

@@ -76,7 +76,7 @@ func NewAppGwIngressController(azClient azure.AzClient, appGwIdentifier appgw.Id
 func (c *AppGwIngressController) Start(envVariables environment.EnvVariables) error {
 	// Starts k8scontext which contains all the informers
 	// This will start individual go routines for informers
-	if err := c.k8sContext.Run(c.stopChannel, false, envVariables); err != nil {
+	if err := c.k8sContext.Run(c.stopChannel, envVariables.IgnoreCRDs, envVariables); err != nil {
 		klog.Error("Could not start Kubernetes Context: ", err)
 		return err
 	}
